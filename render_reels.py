@@ -6,6 +6,7 @@ Fetches pending jobs from WordPress REST API, renders videos with FFmpeg, upload
 
 import os
 import sys
+import re
 import json
 import base64
 import requests
@@ -68,10 +69,28 @@ def download_image(url, dest_path):
         return False
 
 
+def get_original_wp_image_url(url):
+    """Strip WordPress image size suffixes (e.g. -150x150, -300x300, -1024x1024) to get the original image URL."""
+    if not url:
+        return ""
+    # Matches patterns like -150x150 or -768x512 before the file extension at the end of the URL
+    cleaned_url = re.sub(r'-\d+x\d+(?=\.[a-zA-Z0-9]+$)', '', url)
+    return cleaned_url
+
+
 def wrap_text(text, max_chars=35):
-    """Wrap long text into multiple lines for FFmpeg drawtext."""
+    """Wrap long text and center-align each line using space padding."""
+    if not text:
+        return ""
+    # Standard wrap
     lines = textwrap.wrap(text, width=max_chars)
-    return '\n'.join(lines) if lines else text
+    if not lines:
+        return text
+    # Find max line length
+    max_len = max(len(l) for l in lines)
+    # Center each line using padding so that drawtext looks beautifully centered
+    centered_lines = [l.center(max_len) for l in lines]
+    return '\n'.join(centered_lines)
 
 
 def escape_ffmpeg_text(text):
@@ -107,15 +126,15 @@ def render_video(job_id, image_path, script, style, output_path):
     if style == 'premium_academic':
         bg_color       = '0x1a1a2e'
         accent_color   = '0xf59e0b'  # Gold
-        overlay_alpha  = '0.75'
+        overlay_alpha  = '0.35'      # Subtle premium overlay for bright background
     elif style == 'viral_quiz':
         bg_color       = '0x0f172a'
         accent_color   = '0x8b5cf6'  # Purple
-        overlay_alpha  = '0.80'
+        overlay_alpha  = '0.40'      # Dynamic overlay
     else:  # dark_emergency
         bg_color       = '0x0f0f1a'
         accent_color   = '0xe11d48'  # Emergency Red
-        overlay_alpha  = '0.85'
+        overlay_alpha  = '0.45'      # Dramatic overlay but still highly visible
 
     # ─── Build FFmpeg Filter Graph ────────────────────────────────────────────
     # Using textfile avoids any quoting or escaping issues in drawtext.
@@ -124,21 +143,30 @@ def render_video(job_id, image_path, script, style, output_path):
     reveal_file_str = str(reveal_file).replace('\\', '/')
     pearl_file_str  = str(pearl_file).replace('\\', '/')
 
+    # To achieve ultra-sharp, cinematic 8K-like quality and bypass the blurry, pixelated
+    # default scaling of FFmpeg's zoompan, we use Supersampling:
+    # 1. Scale the input image up to 2160x3840 using the premium Lanczos filter.
+    # 2. Run the zoompan filter at full 2160x3840 resolution.
+    # 3. Downscale the resulting video back to 1080x1920 using Lanczos for extremely crisp details.
     filter_complex = (
-        # Scale image to cover 1080x1920, add slow zoom-pan
-        f"[0:v]scale={VIDEO_W*2}:{VIDEO_H*2},"
-        f"zoompan=z='min(zoom+0.001,1.3)':d={VIDEO_DUR*VIDEO_FPS}:"
+        # Step 1: Scale input up to 2160x3840 with high-quality Lanczos scaling
+        f"[0:v]scale=2160:3840:flags=lanczos,"
+        # Step 2: Apply zoompan at 4K canvas size (2160x3840) to preserve pristine pixel detail
+        f"zoompan=z='min(zoom+0.0008,1.25)':d={VIDEO_DUR*VIDEO_FPS}:"
         f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
-        f"s={VIDEO_W}x{VIDEO_H}:fps={VIDEO_FPS}[zoomed];"
+        f"s=2160x3840:fps={VIDEO_FPS}[zoomed_high];"
+        
+        # Step 3: Downscale back to 1080x1920 using Lanczos for flawless supersampled results
+        f"[zoomed_high]scale=1080:1920:flags=lanczos[zoomed];"
 
-        # Dark overlay for readability
-        f"color=c={bg_color}:s={VIDEO_W}x{VIDEO_H}:r={VIDEO_FPS}[bg];"
+        # Dark overlay (subtle 35-45% for high visibility of cinematic background)
+        f"color=c={bg_color}:s=1080x1920:r={VIDEO_FPS}[bg];"
         f"[bg][zoomed]blend=all_mode=overlay:all_opacity={overlay_alpha}[blended];"
 
         # PHASE 1: Hook text (0-8s)
         f"[blended]drawtext=fontfile={FONT_PATH}:"
         f"textfile='{hook_file_str}':"
-        f"fontcolor=white:fontsize=52:box=1:boxcolor=black@0.6:boxborderw=20:"
+        f"fontcolor=white:fontsize=52:box=1:boxcolor=black@0.65:boxborderw=20:"
         f"x=(w-text_w)/2:y=h*0.15:enable='between(t,0,8)':"
         f"line_spacing=12[v1];"
 
@@ -269,10 +297,15 @@ def main():
         # Download image
         img_path = WORK_DIR / f"img_{job_id}.jpg"
         if img_url:
-            if not download_image(img_url, img_path):
-                # Use a generated placeholder background
-                log("  ⚠️  Using dark background fallback (no image)")
-                img_url = None
+            # Recover the high-resolution original image if it's a WordPress thumbnail
+            high_res_url = get_original_wp_image_url(img_url)
+            log(f"  📥 High-res Image Check: {high_res_url}")
+            if not download_image(high_res_url, img_path):
+                log("  ⚠️  Failed to download high-res image, falling back to original thumbnail...")
+                if not download_image(img_url, img_path):
+                    # Use a generated placeholder background
+                    log("  ⚠️  Using dark background fallback (no image)")
+                    img_url = None
         
         if not img_url or not img_path.exists():
             # Create a solid dark background image with Pillow
