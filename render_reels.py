@@ -3,8 +3,9 @@ import json
 import uuid
 import random
 import subprocess
+import requests
+
 from pathlib import Path
-from datetime import datetime
 
 # ═════════════════════════════════════════════════════
 # DalilENT Media Engine — render_reels.py
@@ -14,9 +15,6 @@ from datetime import datetime
 BASE_DIR = Path(__file__).parent
 OUTPUT_DIR = BASE_DIR / "output"
 TEMP_DIR = BASE_DIR / "temp"
-ASSETS_DIR = BASE_DIR / "assets"
-FONT_DIR = ASSETS_DIR / "fonts"
-MUSIC_DIR = ASSETS_DIR / "music"
 
 OUTPUT_DIR.mkdir(exist_ok=True)
 TEMP_DIR.mkdir(exist_ok=True)
@@ -26,118 +24,82 @@ VIDEO_HEIGHT = 1920
 FPS = 30
 
 # ═════════════════════════════════════════════════════
-# STYLE CONFIGS
+# ENV
 # ═════════════════════════════════════════════════════
 
-STYLES = {
-    "dark_emergency": {
-        "font_color": "white",
-        "accent": "red",
-        "bg": "black"
-    },
-    "premium_academic": {
-        "font_color": "#F5E6C8",
-        "accent": "#D4AF37",
-        "bg": "#111111"
-    },
-    "viral_quiz": {
-        "font_color": "yellow",
-        "accent": "orange",
-        "bg": "black"
-    }
+WP_SITE_URL = os.getenv("WP_SITE_URL")
+WP_DME_TOKEN = os.getenv("WP_DME_TOKEN")
+
+if not WP_SITE_URL:
+    raise RuntimeError("Missing WP_SITE_URL")
+
+if not WP_DME_TOKEN:
+    raise RuntimeError("Missing WP_DME_TOKEN")
+
+HEADERS = {
+    "X-DME-TOKEN": WP_DME_TOKEN,
+    "Content-Type": "application/json"
 }
 
 # ═════════════════════════════════════════════════════
-# SAMPLE JOB
+# API ENDPOINTS
 # ═════════════════════════════════════════════════════
 
-sample_job = {
-    "title": "Cholesteatoma",
-    "hook": "Would you miss this ENT emergency?",
-    "reveal": "This finding may destroy the ossicles.",
-    "cta": "Follow DalilENT for daily ENT pearls",
-    "image": "assets/images/cholesteatoma.jpg",
-    "music": "assets/music/dark_ambient.mp3",
-    "style": "dark_emergency",
-    "duration": 20
-}
+PENDING_JOBS_URL = f"{WP_SITE_URL}/wp-json/dme/v1/pending-jobs"
+UPLOAD_VIDEO_URL = f"{WP_SITE_URL}/wp-json/dme/v1/upload-video"
 
 # ═════════════════════════════════════════════════════
 # HELPERS
 # ═════════════════════════════════════════════════════
 
-
 def run_ffmpeg(command):
-    print("\n🎬 Running FFmpeg command...")
+    print("\n🎬 Running FFmpeg...")
     result = subprocess.run(command, shell=True)
 
     if result.returncode != 0:
-        raise RuntimeError("FFmpeg rendering failed")
-
-
+        raise RuntimeError("FFmpeg failed")
 
 def generate_output_name(title):
     safe = title.lower().replace(" ", "_")
     uid = uuid.uuid4().hex[:6]
     return f"{safe}_{uid}.mp4"
 
-
-
-def create_subtitle_file(lines):
-    subtitle_path = TEMP_DIR / f"subtitles_{uuid.uuid4().hex[:6]}.srt"
-
-    with open(subtitle_path, "w", encoding="utf-8") as f:
-        for idx, item in enumerate(lines, start=1):
-            f.write(f"{idx}\n")
-            f.write(f"{item['start']} --> {item['end']}\n")
-            f.write(f"{item['text']}\n\n")
-
-    return subtitle_path
-
-
 # ═════════════════════════════════════════════════════
-# AI TEXT TIMELINE
+# FETCH JOBS
 # ═════════════════════════════════════════════════════
 
+def fetch_pending_jobs():
 
-def build_subtitles(job):
-    return [
-        {
-            "start": "00:00:00,000",
-            "end": "00:00:04,000",
-            "text": job["hook"]
-        },
-        {
-            "start": "00:00:05,000",
-            "end": "00:00:10,000",
-            "text": job["reveal"]
-        },
-        {
-            "start": "00:00:12,000",
-            "end": "00:00:18,000",
-            "text": job["cta"]
-        }
-    ]
+    print("\n🌐 Fetching pending jobs...")
+    print(f"URL: {PENDING_JOBS_URL}")
 
+    response = requests.get(
+        PENDING_JOBS_URL,
+        headers=HEADERS,
+        timeout=30
+    )
+
+    response.raise_for_status()
+
+    jobs = response.json()
+
+    print(f"✅ Found {len(jobs)} pending jobs")
+
+    return jobs
 
 # ═════════════════════════════════════════════════════
-# MAIN RENDER FUNCTION
+# RENDER
 # ═════════════════════════════════════════════════════
-
 
 def render_reel(job):
-    print("\n🚀 Starting cinematic reel render...")
 
-    style = STYLES.get(job["style"], STYLES["dark_emergency"])
+    title = job.get("title", "untitled")
+    image_path = job.get("image")
+    music_path = job.get("music")
+    duration = int(job.get("duration", 20))
 
-    output_name = generate_output_name(job["title"])
+    output_name = generate_output_name(title)
     output_path = OUTPUT_DIR / output_name
-
-    subtitles = build_subtitles(job)
-    subtitle_file = create_subtitle_file(subtitles)
-
-    image_path = job["image"]
-    music_path = job["music"]
 
     zoom_speed = random.choice([
         "0.001",
@@ -153,20 +115,17 @@ ffmpeg -y \
 [0:v]
 scale=1200:2133,
 zoompan=z='min(zoom+{zoom_speed},1.3)':
- d={FPS * job['duration']}:
- x='iw/2-(iw/zoom/2)':
- y='ih/2-(ih/zoom/2)',
+d={FPS * duration}:
+x='iw/2-(iw/zoom/2)':
+y='ih/2-(ih/zoom/2)',
 scale={VIDEO_WIDTH}:{VIDEO_HEIGHT},
 format=yuv420p,
-setsar=1,
-fade=t=in:st=0:d=1,
-fade=t=out:st={job['duration'] - 1}:d=1
-[v];
-[v]subtitles='{subtitle_file}'
-"
+setsar=1
+[v]
+" \
 -map "[v]" \
 -map 1:a \
--t {job['duration']} \
+-t {duration} \
 -r {FPS} \
 -shortest \
 -c:v libx264 \
@@ -180,67 +139,81 @@ fade=t=out:st={job['duration'] - 1}:d=1
 
     run_ffmpeg(ffmpeg_cmd)
 
-    print(f"\n✅ Render completed: {output_path}")
-
     return output_path
 
-
 # ═════════════════════════════════════════════════════
-# VIRAL SCORE MOCK
-# ═════════════════════════════════════════════════════
-
-
-def calculate_viral_score(job):
-    score = random.randint(70, 98)
-
-    if "emergency" in job["hook"].lower():
-        score += 2
-
-    return min(score, 100)
-
-
-# ═════════════════════════════════════════════════════
-# QUEUE PROCESSOR
+# UPLOAD VIDEO
 # ═════════════════════════════════════════════════════
 
+def upload_video(job, video_path):
 
-def process_queue(jobs):
-    results = []
+    print(f"\n📤 Uploading video: {video_path}")
+
+    with open(video_path, "rb") as video_file:
+
+        files = {
+            "video": video_file
+        }
+
+        data = {
+            "job_id": job.get("id")
+        }
+
+        response = requests.post(
+            UPLOAD_VIDEO_URL,
+            headers={
+                "X-DME-TOKEN": WP_DME_TOKEN
+            },
+            files=files,
+            data=data,
+            timeout=120
+        )
+
+    response.raise_for_status()
+
+    print("✅ Upload completed")
+
+# ═════════════════════════════════════════════════════
+# PROCESS QUEUE
+# ═════════════════════════════════════════════════════
+
+def process_queue():
+
+    try:
+        jobs = fetch_pending_jobs()
+
+    except Exception as e:
+        print(f"\n❌ Failed to fetch jobs: {e}")
+        return
+
+    if not jobs:
+        print("\n✅ No jobs to process.")
+        return
 
     for job in jobs:
-        try:
-            score = calculate_viral_score(job)
-            output = render_reel(job)
 
-            results.append({
-                "title": job["title"],
-                "output": str(output),
-                "viral_score": score,
-                "status": "success"
-            })
+        try:
+            print(f"\n🚀 Processing: {job.get('title')}")
+
+            video_path = render_reel(job)
+
+            upload_video(job, video_path)
+
+            print(f"\n✅ Finished: {job.get('title')}")
 
         except Exception as e:
-            results.append({
-                "title": job["title"],
-                "status": "failed",
-                "error": str(e)
-            })
-
-    return results
-
+            print(f"\n❌ Failed job: {job.get('title')}")
+            print(str(e))
 
 # ═════════════════════════════════════════════════════
-# ENTRY POINT
+# ENTRY
 # ═════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    print("\n🧠 DalilENT Media Engine")
-    print("🎥 Cinematic Medical Reel Renderer")
-    print("══════════════════════════════════")
 
-    queue = [sample_job]
+    print("\n============================================================")
+    print("🎬 DalilENT Media Engine — GitHub Actions Renderer")
+    print(f"🌐 Target: {WP_SITE_URL}")
+    print("============================================================")
 
-    results = process_queue(queue)
-
-    print("\n📊 FINAL RESULTS")
-    print(json.dumps(results, indent=2))
+    process_queue()
