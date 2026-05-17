@@ -104,7 +104,7 @@ def escape_ffmpeg_text(text):
     return text[:120] if len(text) > 120 else text
 
 
-def render_video(job_id, image_path, script, style, output_path):
+def render_video(job_id, image_paths, script, style, output_path):
     # Wrap text for multiple lines beautifully
     hook_wrapped   = wrap_text(script.get('hook', 'DalilENT Medical Education'), 30)
     reveal_wrapped = wrap_text(script.get('reveal_text', 'Medical Finding'), 24)
@@ -143,26 +143,41 @@ def render_video(job_id, image_path, script, style, output_path):
     reveal_file_str = str(reveal_file).replace('\\', '/')
     pearl_file_str  = str(pearl_file).replace('\\', '/')
 
-    # To achieve ultra-sharp, cinematic 8K-like quality and bypass the blurry, pixelated
-    # default scaling of FFmpeg's zoompan, we use Supersampling:
-    # 1. Scale the input image up to 2160x3840 using the premium Lanczos filter.
-    # 2. Run the zoompan filter at full 2160x3840 resolution.
-    # 3. Downscale the resulting video back to 1080x1920 using Lanczos for extremely crisp details.
-    filter_complex = (
-        # Step 1: Scale input up to 2160x3840 with high-quality Lanczos scaling
-        f"[0:v]scale=2160:3840:flags=lanczos,"
-        # Step 2: Apply zoompan at 4K canvas size (2160x3840) to preserve pristine pixel detail
-        f"zoompan=z='min(zoom+0.0008,1.25)':d={VIDEO_DUR*VIDEO_FPS}:"
-        f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
-        f"s=2160x3840:fps={VIDEO_FPS}[zoomed_high];"
-        
-        # Step 3: Downscale back to 1080x1920 using Lanczos for flawless supersampled results
-        f"[zoomed_high]scale=1080:1920:flags=lanczos[zoomed];"
+    # Calculate frames per segment for N images
+    num_images = len(image_paths)
+    seg_dur = VIDEO_DUR / num_images
+    seg_frames = int(seg_dur * VIDEO_FPS)
 
-        # Dark overlay (subtle 35-45% for high visibility of cinematic background)
+    # Dynamic Filter Graph for multi-image slideshow:
+    # 1. Loop through all image inputs, scale to 4K using Lanczos.
+    # 2. Run the zoompan filter on each input at full 2160x3840 resolution.
+    # 3. Downscale back to 1080x1920 using Lanczos.
+    # 4. Concatenate all segments sequentially.
+    filter_parts = []
+    concat_inputs = ""
+    for i, path in enumerate(image_paths):
+        filter_parts.append(
+            f"[{i}:v]scale=2160:3840:flags=lanczos,"
+            f"zoompan=z='min(zoom+0.0008,1.25)':d={seg_frames}:"
+            f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+            f"s=2160x3840:fps={VIDEO_FPS}[zoomed_high_{i}];"
+            f"[zoomed_high_{i}]scale=1080:1920:flags=lanczos[v{i}_zoomed]"
+        )
+        concat_inputs += f"[v{i}_zoomed]"
+
+    # Concatenate all zoomed clips
+    filter_parts.append(f"{concat_inputs}concat=n={num_images}:v=1:a=0[zoomed]")
+
+    # Apply color overlay and drawtext phases
+    filter_parts.append(
         f"color=c={bg_color}:s=1080x1920:r={VIDEO_FPS}[bg];"
-        f"[bg][zoomed]blend=all_mode=overlay:all_opacity={overlay_alpha}[blended];"
+        f"[bg][zoomed]blend=all_mode=overlay:all_opacity={overlay_alpha}[blended]"
+    )
 
+    filter_complex_str = ";".join(filter_parts)
+
+    filter_complex = (
+        filter_complex_str + ";"
         # PHASE 1: Hook text (0-8s)
         f"[blended]drawtext=fontfile={FONT_PATH}:"
         f"textfile='{hook_file_str}':"
@@ -191,9 +206,12 @@ def render_video(job_id, image_path, script, style, output_path):
         f"x=w-text_w-30:y=h-text_h-30[vout]"
     )
 
-    cmd = [
-        'ffmpeg', '-y',
-        '-loop', '1', '-i', str(image_path),
+    # Compile FFmpeg Command with multiple inputs
+    cmd = ['ffmpeg', '-y']
+    for path in image_paths:
+        cmd.extend(['-loop', '1', '-t', f"{seg_dur:.2f}", '-i', str(path)])
+
+    cmd.extend([
         '-filter_complex', filter_complex,
         '-map', '[vout]',
         '-c:v', 'libx264', '-preset', 'fast',
@@ -202,7 +220,7 @@ def render_video(job_id, image_path, script, style, output_path):
         '-pix_fmt', 'yuv420p',
         '-movflags', '+faststart',
         str(output_path)
-    ]
+    ])
 
     log(f"  🎞️  Running FFmpeg...")
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
@@ -294,23 +312,28 @@ def main():
         log(f"   Style: {style} | Viral Score: {job.get('viral_score', '?')}/100")
         log(f"   Hook: {script.get('hook', 'N/A')[:60]}...")
 
-        # Download image
-        img_path = WORK_DIR / f"img_{job_id}.jpg"
-        if img_url:
-            # Recover the high-resolution original image if it's a WordPress thumbnail
-            high_res_url = get_original_wp_image_url(img_url)
-            log(f"  📥 High-res Image Check: {high_res_url}")
-            if not download_image(high_res_url, img_path):
-                log("  ⚠️  Failed to download high-res image, falling back to original thumbnail...")
-                if not download_image(img_url, img_path):
-                    # Use a generated placeholder background
-                    log("  ⚠️  Using dark background fallback (no image)")
-                    img_url = None
-        
-        if not img_url or not img_path.exists():
-            # Create a solid dark background image with Pillow
+        # Download images
+        additional_images = job.get('additional_images', [])
+        if not additional_images and img_url:
+            additional_images = [img_url]
+
+        downloaded_images = []
+        for i, url in enumerate(additional_images):
+            img_path = WORK_DIR / f"img_{job_id}_{i}.jpg"
+            high_res_url = get_original_wp_image_url(url)
+            log(f"  📥 Image [{i}] High-res Check: {high_res_url}")
+            if download_image(high_res_url, img_path):
+                downloaded_images.append(img_path)
+            elif download_image(url, img_path):
+                downloaded_images.append(img_path)
+            else:
+                log(f"  ⚠️  Failed to download image [{i}]")
+
+        # Fallback if no images were successfully downloaded
+        if not downloaded_images:
+            img_path = WORK_DIR / f"img_{job_id}_fallback.jpg"
             try:
-                from PIL import Image, ImageDraw
+                from PIL import Image
                 colors = {
                     'dark_emergency': (15, 15, 26),
                     'premium_academic': (26, 26, 46),
@@ -319,15 +342,20 @@ def main():
                 bg_rgb = colors.get(style, (15, 15, 26))
                 img = Image.new('RGB', (VIDEO_W * 2, VIDEO_H * 2), color=bg_rgb)
                 img.save(img_path, 'JPEG', quality=95)
+                downloaded_images.append(img_path)
                 log(f"  🎨 Created placeholder background image")
             except Exception as e:
-                log(f"  ❌ Could not create image: {e}")
+                log(f"  ❌ Could not create fallback image: {e}")
                 fail_count += 1
                 continue
 
         # Render video
         output_path = WORK_DIR / f"reel_{job_id}.mp4"
-        if not render_video(job_id, img_path, script, style, output_path):
+        if not render_video(job_id, downloaded_images, script, style, output_path):
+            # Cleanup downloaded images
+            for f in downloaded_images:
+                if f.exists():
+                    f.unlink()
             fail_count += 1
             continue
 
@@ -338,7 +366,7 @@ def main():
             fail_count += 1
 
         # Cleanup local files
-        for f in [img_path, output_path]:
+        for f in downloaded_images + [output_path]:
             if f.exists():
                 f.unlink()
 
