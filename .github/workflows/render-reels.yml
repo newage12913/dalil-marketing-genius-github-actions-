@@ -48,4 +48,3 @@ jobs:
           name: render-logs-${{ github.run_number }}
           path: render_logs/
           retention-days: 7
-
