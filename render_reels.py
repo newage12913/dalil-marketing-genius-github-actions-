@@ -217,6 +217,11 @@ def main():
         log("❌ ERROR: WP_SITE_URL and WP_DME_TOKEN secrets are required!")
         sys.exit(1)
 
+    # Secure Diagnostic Verification
+    token_len = len(WP_DME_TOKEN)
+    masked_token = f"{WP_DME_TOKEN[0]}...{WP_DME_TOKEN[-1]}" if token_len > 2 else "N/A"
+    log(f"🔑 Token Secret Diagnostic: Length = {token_len} | Masked = '{masked_token}'")
+
     jobs = fetch_pending_jobs()
     log(f"📋 Found {len(jobs)} pending job(s).")
 
