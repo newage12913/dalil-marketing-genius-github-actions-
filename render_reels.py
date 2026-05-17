@@ -30,9 +30,9 @@ LOG_DIR  = Path('render_logs')
 WORK_DIR.mkdir(exist_ok=True)
 LOG_DIR.mkdir(exist_ok=True)
 
-# Video specs — Cinematic Vertical 9:16
-VIDEO_W   = 1080
-VIDEO_H   = 1920
+# Video specs — Cinematic Vertical 9:16 (True 4K Ultra HD)
+VIDEO_W   = 2160
+VIDEO_H   = 3840
 VIDEO_FPS = 30
 VIDEO_DUR = 20  # seconds
 
@@ -122,19 +122,96 @@ def render_video(job_id, image_paths, script, style, output_path):
     with open(pearl_file, 'w', encoding='utf-8') as f:
         f.write(pearl_wrapped)
 
-    # ─── Color Palette by Style ───────────────────────────────────────────────
+    # ─── Color Palette & Typography Design by Style (4K Resolution Specs) ─────
     if style == 'premium_academic':
-        bg_color       = '0x1a1a2e'
+        # Elegant Navy and Luxury Gold Look
+        bg_color       = '0x0b0f19'
         accent_color   = '0xf59e0b'  # Gold
-        overlay_alpha  = '0.35'      # Subtle premium overlay for bright background
+        overlay_alpha  = '0.35'
+        
+        # Phase 1 Subtitles: Sleek Navy Box with Gold Border Outline
+        p1_fontcolor   = 'white'
+        p1_fontsize    = 104  # 4K Double-scaled
+        p1_boxcolor    = '0x0f172a@0.85'
+        p1_boxborder   = 44   # 4K Double-scaled
+        p1_borderw     = 4    # 4K Double-scaled
+        p1_bordercolor = '0xf59e0b'
+        
+        # Phase 2 (Reveal): Magnificent Bold Gold Block with subtle dark shadow
+        p2_fontcolor   = '0xf59e0b'
+        p2_fontsize    = 148  # 4K Double-scaled
+        p2_boxcolor    = '0x0b0f19@0.9'
+        p2_boxborder   = 52   # 4K Double-scaled
+        p2_borderw     = 0
+        p2_bordercolor = 'black'
+        
+        # Phase 3 (Pearl): Slate Box with elegant Gold outline
+        p3_fontcolor   = 'white'
+        p3_fontsize    = 88   # 4K Double-scaled
+        p3_boxcolor    = '0x1e293b@0.9'
+        p3_boxborder   = 36   # 4K Double-scaled
+        p3_borderw     = 4    # 4K Double-scaled
+        p3_bordercolor = '0xf59e0b'
+        
     elif style == 'viral_quiz':
-        bg_color       = '0x0f172a'
+        # High-retention Electric Purple & Cyan
+        bg_color       = '0x0d071a'
         accent_color   = '0x8b5cf6'  # Purple
-        overlay_alpha  = '0.40'      # Dynamic overlay
+        overlay_alpha  = '0.40'
+        
+        # Phase 1 Subtitles: Cyber Purple Glow Box
+        p1_fontcolor   = 'white'
+        p1_fontsize    = 108  # 4K Double-scaled
+        p1_boxcolor    = '0x1e1b4b@0.85'
+        p1_boxborder   = 40   # 4K Double-scaled
+        p1_borderw     = 4    # 4K Double-scaled
+        p1_bordercolor = '0x8b5cf6'
+        
+        # Phase 2 (Reveal): Dynamic Cyber Cyan pop
+        p2_fontcolor   = '0x06b6d4'  # Neon Cyan
+        p2_fontsize    = 152  # 4K Double-scaled
+        p2_boxcolor    = 'black@0.9'
+        p2_boxborder   = 56   # 4K Double-scaled
+        p2_borderw     = 4    # 4K Double-scaled
+        p2_bordercolor = '0x06b6d4'
+        
+        # Phase 3 (Pearl): Deep Indigo Box with Neon Purple Border
+        p3_fontcolor   = 'white'
+        p3_fontsize    = 92   # 4K Double-scaled
+        p3_boxcolor    = '0x311042@0.9'
+        p3_boxborder   = 40   # 4K Double-scaled
+        p3_borderw     = 4    # 4K Double-scaled
+        p3_bordercolor = '0x8b5cf6'
+        
     else:  # dark_emergency
-        bg_color       = '0x0f0f1a'
-        accent_color   = '0xe11d48'  # Emergency Red
-        overlay_alpha  = '0.45'      # Dramatic overlay but still highly visible
+        # High Stakes Dramatic Emergency
+        bg_color       = '0x0d0306'  # Deep Crimson Black
+        accent_color   = '0xe11d48'  # Neon Red
+        overlay_alpha  = '0.45'
+        
+        # Phase 1 Subtitles: Deep Crimson Dark Box with warning outline
+        p1_fontcolor   = 'white'
+        p1_fontsize    = 104  # 4K Double-scaled
+        p1_boxcolor    = '0x180206@0.85'
+        p1_boxborder   = 44   # 4K Double-scaled
+        p1_borderw     = 4    # 4K Double-scaled
+        p1_bordercolor = '0xe11d48'
+        
+        # Phase 2 (Reveal): High contrast warning block
+        p2_fontcolor   = '0xe11d48'
+        p2_fontsize    = 144  # 4K Double-scaled
+        p2_boxcolor    = 'black@0.9'
+        p2_boxborder   = 50   # 4K Double-scaled
+        p2_borderw     = 6    # 4K Double-scaled
+        p2_bordercolor = '0xe11d48'
+        
+        # Phase 3 (Pearl): Solid Emergency Warning block
+        p3_fontcolor   = 'white'
+        p3_fontsize    = 88   # 4K Double-scaled
+        p3_boxcolor    = '0xe11d48@0.95'
+        p3_boxborder   = 36   # 4K Double-scaled
+        p3_borderw     = 0
+        p3_bordercolor = 'black'
 
     # ─── Build FFmpeg Filter Graph ────────────────────────────────────────────
     # Using textfile avoids any quoting or escaping issues in drawtext.
@@ -148,12 +225,11 @@ def render_video(job_id, image_paths, script, style, output_path):
     seg_dur = VIDEO_DUR / num_images
     seg_frames = int(seg_dur * VIDEO_FPS)
 
-    # Dynamic Filter Graph for multi-image slideshow:
+    # Dynamic Filter Graph for multi-image slideshow (Pure 4K Ultra HD):
     # 1. Loop through all image inputs, scale to 4K using Lanczos.
     # 2. Run the zoompan filter on each input at full 2160x3840 resolution.
-    # 3. Apply professional Hollywood dramatic vignette and color/contrast boost.
-    # 4. Downscale back to 1080x1920 using Lanczos.
-    # 5. Concatenate all segments sequentially.
+    # 3. Apply professional Hollywood dramatic vignette and vibrant brightness correction.
+    # 4. Concatenate all segments sequentially without downscaling.
     filter_parts = []
     concat_inputs = ""
     for i, path in enumerate(image_paths):
@@ -162,53 +238,52 @@ def render_video(job_id, image_paths, script, style, output_path):
             f"zoompan=z='min(zoom+0.0008,1.25)':d={seg_frames}:"
             f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
             f"s=2160x3840:fps={VIDEO_FPS},"
-            f"vignette=PI/4,eq=contrast=1.16:saturation=1.15:brightness=-0.03[zoomed_high_{i}];"
-            f"[zoomed_high_{i}]scale=1080:1920:flags=lanczos[v{i}_zoomed]"
+            f"vignette=PI/5,eq=contrast=1.08:saturation=1.22:brightness=0.04[v{i}_zoomed]"
         )
         concat_inputs += f"[v{i}_zoomed]"
 
     # Concatenate all zoomed clips
     filter_parts.append(f"{concat_inputs}concat=n={num_images}:v=1:a=0[zoomed]")
 
-    # Apply color overlay and drawtext phases
-    filter_parts.append(
-        f"color=c={bg_color}:s=1080x1920:r={VIDEO_FPS}[bg];"
-        f"[bg][zoomed]blend=all_mode=overlay:all_opacity={overlay_alpha}[blended]"
-    )
-
     filter_complex_str = ";".join(filter_parts)
 
     filter_complex = (
         filter_complex_str + ";"
         # PHASE 1: Hook text (0-8s) with elegant 0.5s fade-in & fade-out
-        f"[blended]drawtext=fontfile={FONT_PATH}:"
+        f"[zoomed]drawtext=fontfile={FONT_PATH}:"
         f"textfile='{hook_file_str}':"
-        f"fontcolor=white:fontsize=52:box=1:boxcolor=black@0.65:boxborderw=20:"
+        f"fontcolor={p1_fontcolor}:fontsize={p1_fontsize}:"
+        f"box=1:boxcolor={p1_boxcolor}:boxborderw={p1_boxborder}:"
+        f"borderw={p1_borderw}:bordercolor={p1_bordercolor}:"
         f"x=(w-text_w)/2:y=h*0.15:enable='between(t,0,8)':"
         f"alpha='if(lt(t,0.5),2*t,if(gt(t,7.5),2*(8-t),1))':"
-        f"line_spacing=12[v1];"
+        f"line_spacing=24[v1];"
 
         # PHASE 2: Reveal text with accent flash (8-15s) with elegant 0.5s fade-in & fade-out
         f"[v1]drawtext=fontfile={FONT_PATH}:"
         f"textfile='{reveal_file_str}':"
-        f"fontcolor={accent_color}:fontsize=72:box=1:boxcolor=black@0.85:boxborderw=25:"
+        f"fontcolor={p2_fontcolor}:fontsize={p2_fontsize}:"
+        f"box=1:boxcolor={p2_boxcolor}:boxborderw={p2_boxborder}:"
+        f"borderw={p2_borderw}:bordercolor={p2_bordercolor}:"
         f"x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,8,15)':"
         f"alpha='if(lt(t,8.5),2*(t-8),if(gt(t,14.5),2*(15-t),1))':"
-        f"line_spacing=14[v2];"
+        f"line_spacing=28[v2];"
 
         # PHASE 3: Pearl at bottom (15-20s) with elegant 0.5s fade-in & fade-out
         f"[v2]drawtext=fontfile={FONT_PATH}:"
         f"textfile='{pearl_file_str}':"
-        f"fontcolor=white:fontsize=44:box=1:boxcolor={accent_color}@0.9:boxborderw=18:"
+        f"fontcolor={p3_fontcolor}:fontsize={p3_fontsize}:"
+        f"box=1:boxcolor={p3_boxcolor}:boxborderw={p3_boxborder}:"
+        f"borderw={p3_borderw}:bordercolor={p3_bordercolor}:"
         f"x=(w-text_w)/2:y=h*0.78:enable='between(t,15,20)':"
         f"alpha='if(lt(t,15.5),2*(t-15),if(gt(t,19.5),2*(20-t),1))':"
-        f"line_spacing=10[v3];"
+        f"line_spacing=20[v3];"
 
         # DalilENT watermark (always visible)
         f"[v3]drawtext=fontfile={FONT_PATH}:"
         f"text='DalilENT':"
-        f"fontcolor={accent_color}:fontsize=34:alpha=0.8:"
-        f"x=w-text_w-30:y=h-text_h-30[vout]"
+        f"fontcolor={accent_color}:fontsize=68:alpha=0.85:"
+        f"x=w-text_w-60:y=h-text_h-60[vout]"
     )
 
     # Compile FFmpeg Command with multiple inputs
