@@ -1,50 +1,161 @@
-name: 🎬 DalilENT Reel Renderer
+name: 🎬 DalilENT Enterprise Reel Renderer
 
 on:
-  schedule:
-    # Run every 30 minutes
-    - cron: '*/30 * * * *'
-  workflow_dispatch:
-    # Allow manual trigger from GitHub UI
-    inputs:
-      force_run:
-        description: 'Force run even if no jobs'
-        required: false
-        default: 'false'
+schedule:
+# Run every 30 minutes
+- cron: '*/30 * * * *'
+
+workflow_dispatch:
+inputs:
+force_run:
+description: 'Force render even if queue is empty'
+required: false
+default: 'false'
+
+concurrency:
+group: dalilent-reel-renderer
+cancel-in-progress: false
 
 jobs:
-  render-reels:
-    name: Render Pending Reels
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+render-reels:
+name: 🚀 Render Cinematic Medical Reels
+runs-on: ubuntu-latest
+timeout-minutes: 30
 
-    steps:
-      - name: 📥 Checkout Repository
-        uses: actions/checkout@v4
+```
+env:
+  PYTHONUNBUFFERED: 1
 
-      - name: 🎞️ Install FFmpeg
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y ffmpeg fonts-dejavu-core
+steps:
 
-      - name: 🐍 Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
+  # ════════════════════════════════════
+  # CHECKOUT
+  # ════════════════════════════════════
 
-      - name: 📦 Install Python Dependencies
-        run: pip install requests Pillow
+  - name: 📥 Checkout Repository
+    uses: actions/checkout@v4
 
-      - name: 🤖 Fetch & Render Jobs
-        env:
-          WP_SITE_URL:   ${{ secrets.WP_SITE_URL }}
-          WP_DME_TOKEN:  ${{ secrets.WP_DME_TOKEN }}
-        run: python render_reels.py
+  # ════════════════════════════════════
+  # CACHE PYTHON
+  # ════════════════════════════════════
 
-      - name: 📊 Upload Render Logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: render-logs-${{ github.run_number }}
-          path: render_logs/
-          retention-days: 7
+  - name: 🧠 Cache Python Dependencies
+    uses: actions/cache@v4
+    with:
+      path: ~/.cache/pip
+      key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+      restore-keys: |
+        ${{ runner.os }}-pip-
+
+  # ════════════════════════════════════
+  # INSTALL FFMPEG
+  # ════════════════════════════════════
+
+  - name: 🎞️ Install FFmpeg & Fonts
+    run: |
+      sudo apt-get update -qq
+      sudo apt-get install -y \
+        ffmpeg \
+        fonts-dejavu-core \
+        fonts-freefont-ttf
+
+  # ════════════════════════════════════
+  # PYTHON
+  # ════════════════════════════════════
+
+  - name: 🐍 Set up Python
+    uses: actions/setup-python@v5
+    with:
+      python-version: '3.11'
+
+  # ════════════════════════════════════
+  # DEPENDENCIES
+  # ════════════════════════════════════
+
+  - name: 📦 Install Python Dependencies
+    run: |
+      pip install --upgrade pip
+      pip install requests Pillow openai python-dotenv
+
+  # ════════════════════════════════════
+  # CREATE REQUIRED FOLDERS
+  # ════════════════════════════════════
+
+  - name: 📂 Create Runtime Directories
+    run: |
+      mkdir -p output
+      mkdir -p temp
+      mkdir -p render_logs
+
+  # ════════════════════════════════════
+  # VALIDATE ENVIRONMENT
+  # ════════════════════════════════════
+
+  - name: 🔍 Validate Environment
+    run: |
+      echo "Checking FFmpeg..."
+      ffmpeg -version
+
+      echo "Checking Python..."
+      python --version
+
+      echo "Checking directories..."
+      ls -la
+
+  # ════════════════════════════════════
+  # FETCH & RENDER
+  # ════════════════════════════════════
+
+  - name: 🤖 Fetch & Render Jobs
+    env:
+      WP_SITE_URL:  ${{ secrets.WP_SITE_URL }}
+      WP_DME_TOKEN: ${{ secrets.WP_DME_TOKEN }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    run: |
+      python render_reels.py
+
+  # ════════════════════════════════════
+  # CLEAN TEMP FILES
+  # ════════════════════════════════════
+
+  - name: 🧹 Cleanup Temporary Files
+    if: always()
+    run: |
+      rm -rf temp/* || true
+
+  # ════════════════════════════════════
+  # UPLOAD LOGS
+  # ════════════════════════════════════
+
+  - name: 📊 Upload Render Logs
+    if: always()
+    uses: actions/upload-artifact@v4
+    with:
+      name: render-logs-${{ github.run_number }}
+      path: render_logs/
+      retention-days: 7
+
+  # ════════════════════════════════════
+  # UPLOAD VIDEOS
+  # ════════════════════════════════════
+
+  - name: 🎥 Upload Rendered Videos
+    if: always()
+    uses: actions/upload-artifact@v4
+    with:
+      name: rendered-reels-${{ github.run_number }}
+      path: output/
+      retention-days: 3
+
+  # ════════════════════════════════════
+  # FAILURE DEBUGGING
+  # ════════════════════════════════════
+
+  - name: 🚨 Debug Failed Workflow
+    if: failure()
+    run: |
+      echo "Workflow failed."
+      echo "Dumping logs..."
+      ls -la
+      find . -type f | sort
+```
