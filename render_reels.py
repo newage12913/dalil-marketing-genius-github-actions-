@@ -151,8 +151,9 @@ def render_video(job_id, image_paths, script, style, output_path):
     # Dynamic Filter Graph for multi-image slideshow:
     # 1. Loop through all image inputs, scale to 4K using Lanczos.
     # 2. Run the zoompan filter on each input at full 2160x3840 resolution.
-    # 3. Downscale back to 1080x1920 using Lanczos.
-    # 4. Concatenate all segments sequentially.
+    # 3. Apply professional Hollywood dramatic vignette and color/contrast boost.
+    # 4. Downscale back to 1080x1920 using Lanczos.
+    # 5. Concatenate all segments sequentially.
     filter_parts = []
     concat_inputs = ""
     for i, path in enumerate(image_paths):
@@ -160,7 +161,8 @@ def render_video(job_id, image_paths, script, style, output_path):
             f"[{i}:v]scale=2160:3840:flags=lanczos,"
             f"zoompan=z='min(zoom+0.0008,1.25)':d={seg_frames}:"
             f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
-            f"s=2160x3840:fps={VIDEO_FPS}[zoomed_high_{i}];"
+            f"s=2160x3840:fps={VIDEO_FPS},"
+            f"vignette=PI/4,eq=contrast=1.16:saturation=1.15:brightness=-0.03[zoomed_high_{i}];"
             f"[zoomed_high_{i}]scale=1080:1920:flags=lanczos[v{i}_zoomed]"
         )
         concat_inputs += f"[v{i}_zoomed]"
@@ -178,25 +180,28 @@ def render_video(job_id, image_paths, script, style, output_path):
 
     filter_complex = (
         filter_complex_str + ";"
-        # PHASE 1: Hook text (0-8s)
+        # PHASE 1: Hook text (0-8s) with elegant 0.5s fade-in & fade-out
         f"[blended]drawtext=fontfile={FONT_PATH}:"
         f"textfile='{hook_file_str}':"
         f"fontcolor=white:fontsize=52:box=1:boxcolor=black@0.65:boxborderw=20:"
         f"x=(w-text_w)/2:y=h*0.15:enable='between(t,0,8)':"
+        f"alpha='if(lt(t,0.5),2*t,if(gt(t,7.5),2*(8-t),1))':"
         f"line_spacing=12[v1];"
 
-        # PHASE 2: Reveal text with accent flash (8-15s)
+        # PHASE 2: Reveal text with accent flash (8-15s) with elegant 0.5s fade-in & fade-out
         f"[v1]drawtext=fontfile={FONT_PATH}:"
         f"textfile='{reveal_file_str}':"
         f"fontcolor={accent_color}:fontsize=72:box=1:boxcolor=black@0.85:boxborderw=25:"
         f"x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,8,15)':"
+        f"alpha='if(lt(t,8.5),2*(t-8),if(gt(t,14.5),2*(15-t),1))':"
         f"line_spacing=14[v2];"
 
-        # PHASE 3: Pearl at bottom (15-20s)
+        # PHASE 3: Pearl at bottom (15-20s) with elegant 0.5s fade-in & fade-out
         f"[v2]drawtext=fontfile={FONT_PATH}:"
         f"textfile='{pearl_file_str}':"
         f"fontcolor=white:fontsize=44:box=1:boxcolor={accent_color}@0.9:boxborderw=18:"
         f"x=(w-text_w)/2:y=h*0.78:enable='between(t,15,20)':"
+        f"alpha='if(lt(t,15.5),2*(t-15),if(gt(t,19.5),2*(20-t),1))':"
         f"line_spacing=10[v3];"
 
         # DalilENT watermark (always visible)
