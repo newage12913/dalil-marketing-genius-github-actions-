@@ -75,9 +75,10 @@ def wrap_text(text, max_chars=35):
 
 
 def escape_ffmpeg_text(text):
-    """Escape special characters for FFmpeg drawtext filter."""
+    """Escape special characters for FFmpeg drawtext filter with double quotes."""
     text = text.replace('\\', '\\\\')
-    text = text.replace("'", "\\'")
+    text = text.replace('"', '\\"')  # Escape double quotes since we wrap in double quotes
+    text = text.replace("'", "'")    # Keep single quotes as literal
     text = text.replace(':', '\\:')
     text = text.replace('[', '\\[').replace(']', '\\]')
     # Limit length
@@ -105,15 +106,13 @@ def render_video(job_id, image_path, script, style, output_path):
         overlay_alpha  = '0.85'
 
     # ─── Build FFmpeg Filter Graph ────────────────────────────────────────────
-    # Phase 1 (0–8s): Hook text + suspense dark overlay
-    # Phase 2 (8–15s): Reveal text with accent color flash
-    # Phase 3 (15–20s): Pearl text + CTA bar at bottom
-
+    # Escaping commas inside parameters (e.g. between(t\,x\,y) or min(a\,b)) is critical
+    # to prevent FFmpeg's filtergraph parser from mistaking them for filter separators.
     filter_complex = (
         # Scale image to cover 1080x1920, add slow zoom-pan
         f"[0:v]scale={VIDEO_W*2}:{VIDEO_H*2},"
-        f"zoompan=z='min(zoom+0.001,1.3)':d={VIDEO_DUR*VIDEO_FPS}:"
-        f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+        f"zoompan=z=min(zoom+0.001\\,1.3):d={VIDEO_DUR*VIDEO_FPS}:"
+        f"x=iw/2-(iw/zoom/2):y=ih/2-(ih/zoom/2):"
         f"s={VIDEO_W}x{VIDEO_H}:fps={VIDEO_FPS}[zoomed];"
 
         # Dark overlay for readability
@@ -122,26 +121,26 @@ def render_video(job_id, image_path, script, style, output_path):
 
         # PHASE 1: Hook text (0-8s)
         f"[blended]drawtext=fontfile={FONT_PATH}:"
-        f"text='{hook_text}':"
+        f"text=\"{hook_text}\":"
         f"fontcolor=white:fontsize=52:box=1:boxcolor=black@0.6:boxborderw=20:"
-        f"x=(w-text_w)/2:y=h*0.15:enable='between(t,0,8)':"
+        f"x=(w-text_w)/2:y=h*0.15:enable=between(t\\,0\\,8):"
         f"line_spacing=8[v1];"
 
         # PHASE 2: Reveal text with accent flash (8-15s)
         f"[v1]drawtext=fontfile={FONT_PATH}:"
-        f"text='{reveal_text}':"
+        f"text=\"{reveal_text}\":"
         f"fontcolor={accent_color}:fontsize=72:box=1:boxcolor=black@0.85:boxborderw=25:"
-        f"x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,8,15)'[v2];"
+        f"x=(w-text_w)/2:y=(h-text_h)/2:enable=between(t\\,8\\,15)[v2];"
 
         # PHASE 3: Pearl at bottom (15-20s)
         f"[v2]drawtext=fontfile={FONT_PATH}:"
-        f"text='{pearl_text}':"
+        f"text=\"{pearl_text}\":"
         f"fontcolor=white:fontsize=44:box=1:boxcolor={accent_color}@0.9:boxborderw=18:"
-        f"x=(w-text_w)/2:y=h*0.78:enable='between(t,15,20)'[v3];"
+        f"x=(w-text_w)/2:y=h*0.78:enable=between(t\\,15\\,20)[v3];"
 
         # DalilENT watermark (always visible)
         f"[v3]drawtext=fontfile={FONT_PATH}:"
-        f"text='DalilENT':"
+        f"text=\"DalilENT\":"
         f"fontcolor={accent_color}:fontsize=34:alpha=0.8:"
         f"x=w-text_w-30:y=h-text_h-30[vout]"
     )
