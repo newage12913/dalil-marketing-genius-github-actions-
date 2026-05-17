@@ -16,8 +16,8 @@ from pathlib import Path
 from datetime import datetime
 
 # ─── Configuration ───────────────────────────────────────────────────────────
-WP_SITE_URL  = os.environ.get('WP_SITE_URL', '').rstrip('/')
-WP_DME_TOKEN = os.environ.get('WP_DME_TOKEN', '')
+WP_SITE_URL  = os.environ.get('WP_SITE_URL', '').rstrip('/').strip()
+WP_DME_TOKEN = os.environ.get('WP_DME_TOKEN', '').strip()
 
 HEADERS = {
     'X-DME-Token': WP_DME_TOKEN,
