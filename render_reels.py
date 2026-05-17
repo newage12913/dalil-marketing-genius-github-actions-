@@ -86,10 +86,22 @@ def escape_ffmpeg_text(text):
 
 
 def render_video(job_id, image_path, script, style, output_path):
-    hook_text     = escape_ffmpeg_text(script.get('hook', 'DalilENT Medical Education'))
-    pearl_text    = escape_ffmpeg_text(script.get('pearl_text', 'Key clinical pearl'))
-    reveal_text   = escape_ffmpeg_text(script.get('reveal_text', 'Medical Finding'))
-    disease_label = escape_ffmpeg_text(script.get('reveal_text', 'DalilENT')[:40])
+    # Wrap text for multiple lines beautifully
+    hook_wrapped   = wrap_text(script.get('hook', 'DalilENT Medical Education'), 30)
+    reveal_wrapped = wrap_text(script.get('reveal_text', 'Medical Finding'), 24)
+    pearl_wrapped  = wrap_text(script.get('pearl_text', 'Key clinical pearl'), 35)
+
+    hook_file   = WORK_DIR / f"hook_{job_id}.txt"
+    reveal_file = WORK_DIR / f"reveal_{job_id}.txt"
+    pearl_file  = WORK_DIR / f"pearl_{job_id}.txt"
+
+    # Write files in UTF-8
+    with open(hook_file, 'w', encoding='utf-8') as f:
+        f.write(hook_wrapped)
+    with open(reveal_file, 'w', encoding='utf-8') as f:
+        f.write(reveal_wrapped)
+    with open(pearl_file, 'w', encoding='utf-8') as f:
+        f.write(pearl_wrapped)
 
     # ─── Color Palette by Style ───────────────────────────────────────────────
     if style == 'premium_academic':
@@ -106,9 +118,12 @@ def render_video(job_id, image_path, script, style, output_path):
         overlay_alpha  = '0.85'
 
     # ─── Build FFmpeg Filter Graph ────────────────────────────────────────────
-    # Escaping commas inside expressions is best done by wrapping the values in single quotes
-    # (e.g. enable='between(t,x,y)' or z='min(a,b)'), which prevents FFmpeg's filtergraph parser
-    # from mistaking them for filter separators.
+    # Using textfile avoids any quoting or escaping issues in drawtext.
+    # Paths must be passed with forward slashes to FFmpeg even on Windows.
+    hook_file_str   = str(hook_file).replace('\\', '/')
+    reveal_file_str = str(reveal_file).replace('\\', '/')
+    pearl_file_str  = str(pearl_file).replace('\\', '/')
+
     filter_complex = (
         # Scale image to cover 1080x1920, add slow zoom-pan
         f"[0:v]scale={VIDEO_W*2}:{VIDEO_H*2},"
@@ -122,26 +137,28 @@ def render_video(job_id, image_path, script, style, output_path):
 
         # PHASE 1: Hook text (0-8s)
         f"[blended]drawtext=fontfile={FONT_PATH}:"
-        f"text=\"{hook_text}\":"
+        f"textfile='{hook_file_str}':"
         f"fontcolor=white:fontsize=52:box=1:boxcolor=black@0.6:boxborderw=20:"
         f"x=(w-text_w)/2:y=h*0.15:enable='between(t,0,8)':"
-        f"line_spacing=8[v1];"
+        f"line_spacing=12[v1];"
 
         # PHASE 2: Reveal text with accent flash (8-15s)
         f"[v1]drawtext=fontfile={FONT_PATH}:"
-        f"text=\"{reveal_text}\":"
+        f"textfile='{reveal_file_str}':"
         f"fontcolor={accent_color}:fontsize=72:box=1:boxcolor=black@0.85:boxborderw=25:"
-        f"x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,8,15)'[v2];"
+        f"x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,8,15)':"
+        f"line_spacing=14[v2];"
 
         # PHASE 3: Pearl at bottom (15-20s)
         f"[v2]drawtext=fontfile={FONT_PATH}:"
-        f"text=\"{pearl_text}\":"
+        f"textfile='{pearl_file_str}':"
         f"fontcolor=white:fontsize=44:box=1:boxcolor={accent_color}@0.9:boxborderw=18:"
-        f"x=(w-text_w)/2:y=h*0.78:enable='between(t,15,20)'[v3];"
+        f"x=(w-text_w)/2:y=h*0.78:enable='between(t,15,20)':"
+        f"line_spacing=10[v3];"
 
         # DalilENT watermark (always visible)
         f"[v3]drawtext=fontfile={FONT_PATH}:"
-        f"text=\"DalilENT\":"
+        f"text='DalilENT':"
         f"fontcolor={accent_color}:fontsize=34:alpha=0.8:"
         f"x=w-text_w-30:y=h-text_h-30[vout]"
     )
@@ -161,6 +178,11 @@ def render_video(job_id, image_path, script, style, output_path):
 
     log(f"  🎞️  Running FFmpeg...")
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+
+    # Cleanup temporary text files
+    for f in [hook_file, reveal_file, pearl_file]:
+        if f.exists():
+            f.unlink()
 
     # Save FFmpeg log
     with open(LOG_DIR / f'ffmpeg_job_{job_id}.log', 'w') as f:
